@@ -94,7 +94,10 @@ join_array_by_char() {
 
 # RSA ciphers are put at the end to force Google servers to accept ECDSA ciphers
 # (probably a result of a workaround for the bug in Apple implementation of ECDSA)
-CIPHERSUITE="ALL:COMPLEMENTOFALL:+aRSA"
+# It breaks checking conditionally selected ChaCha suites, so it will be added
+# later if ChaCha testing is not selected
+#CIPHERSUITE="ALL:COMPLEMENTOFALL:+aRSA"
+CIPHERSUITE="ALL:COMPLEMENTOFALL"
 # some servers are intolerant to large client hello, try a shorter list of
 # ciphers with them
 SHORTCIPHERSUITE=(
@@ -170,6 +173,7 @@ FALLBACKCIPHERSUITESTRING="$joined_array"
 DEBUG=0
 VERBOSE=0
 DELAY=0
+CHACHA20=0
 ALLCIPHERS=""
 OUTPUTFORMAT="terminal"
 TIMEOUT=30
@@ -207,9 +211,10 @@ ratelimit() {
 }
 
 usage() {
-    echo -e "usage: $0 [-a|--allciphers] [-b|--benchmark] [--capath directory]
-[--saveca] [--savecrt directory] [-d|--delay seconds] [-D|--debug] [-j|--json]
-[-v|--verbose] [-o|--openssl file] [openssl s_client args] <target:port>
+    echo -e "usage: $0 [-a|--allciphers] [-b|--benchmark] [-c|--chacha20]
+[--capath directory] [--saveca] [--savecrt directory] [-d|--delay seconds]
+[-D|--debug] [-j|--json] [-v|--verbose] [-o|--openssl file]
+[openssl s_client args] <target:port>
     usage: $0 -h|--help
 
 $0 attempts to connect to a target site using all the ciphersuites known
@@ -226,6 +231,9 @@ Use one of the options below:
 
 -a | --allciphers   Test all known ciphers individually at the end.
 -b | --benchmark    Activate benchmark mode.
+-c | --chacha20     Move ChaCha20 suites to the top of cipher list
+		    (to detect ChaCha20 suites in sites that only enable them
+		    if they are on top of the client list)
 --capath            use CAs from directory (must be in OpenSSL CAdir format)
 --saveca            save intermediate certificates in CA directory
 -d | --delay        Pause for n seconds between connections
@@ -1109,15 +1117,17 @@ test_serverside_ordering() {
         return 0
     fi
     local cipher=""
+    # We need to tweak this check a little so that it detects ChaCha suites when the server
+    # only selects them if they are at the top of the client's list
+    ciphersuites+=("${cipherspref[-1]%% *}")
+    ciphersuites+=("${cipherspref[-2]%% *}")
     if (( ${#cipherspref[@]} > 2 )); then
         # server supports 3 or more ciphers, rotate all three. This is necessary because google does
         # select first client provided cipher, if it is either CDHE-RSA-AES128-GCM-SHA256 or
         # ECDHE-RSA-CHACHA20-POLY1305
-        ciphersuites+=("${cipherspref[2]%% *}")
+        #ciphersuites+=("${cipherspref[2]%% *}")
+        ciphersuites+=("${cipherspref[-3]%% *}")
     fi
-    # else, server supports just two ciphers, so rotate them, that should be enough
-    ciphersuites+=("${cipherspref[1]%% *}")
-    ciphersuites+=("${cipherspref[0]%% *}")
 
     prefered="${ciphersuites[0]%% *}"
 
@@ -1170,7 +1180,7 @@ test_curves() {
     sslcommand+=("-trusted_first")
     # force the TLS to send a TLS1.0 client hello at least, as with SSLv2
     # ciphers present it will try to send a SSLv2 compatible client hello
-    sslcommand+=("-no_ssl2" "-no_ssl3")
+    sslcommand+=("$NO_SSL2" "-no_ssl3")
 
     #
     # here we use the same logic as with detecting cipher suites: first
@@ -1290,7 +1300,7 @@ test_curves_fallback() {
     sslcommand+=("-status" "${SCLIENTARGS[@]}" "-connect" "$TARGET" "-cipher" "$ecc_ciphers")
     # force the TLS to send a TLS1.0 client hello at least, as with SSLv2
     # ciphers present it will try to send a SSLv2 compatible client hello
-    sslcommand+=("-no_ssl2" "-no_ssl3")
+    sslcommand+=("$NO_SSL2" "-no_ssl3")
 
     #
     # here we use the same logic as with detecting cipher suites: first
@@ -1651,7 +1661,7 @@ test_kex_sigalgs() {
         # since some ciphers supported by server may be SSLv2 only, we need to
         # force use of TLSv1.2, otherwise openssl will send a SSLv2 compatible
         # client hello
-        sslcommand+=("-no_ssl2" "-no_ssl3")
+        sslcommand+=("$NO_SSL2" "-no_ssl3")
         local test_ecdsa_sigalgs=("${ecdsa_sigalgs[@]}")
         local test_rsa_sigalgs=("${rsa_sigalgs[@]}")
 
@@ -1732,7 +1742,7 @@ test_kex_sigalgs() {
         # since some ciphers supported by server may be SSLv2 only, we need to
         # force use of TLSv1.2, otherwise openssl will send a SSLv2 compatible
         # client hello
-        sslcommand+=("-no_ssl2" "-no_ssl3")
+        sslcommand+=("$NO_SSL2" "-no_ssl3")
         local test_ecdsa_sigalgs=("${ecdsa_sigalgs[@]}")
         local test_rsa_sigalgs=("${rsa_sigalgs[@]}")
 
@@ -1833,7 +1843,7 @@ test_kex_sigalgs() {
         # since some ciphers supported by server may be SSLv2 only, we need to
         # force use of TLSv1.2, otherwise openssl will send a SSLv2 compatible
         # client hello
-        sslcommand+=("-no_ssl2" "-no_ssl3")
+        sslcommand+=("$NO_SSL2" "-no_ssl3")
 
         ratelimit
         verbose "Test ordering of sigalgs with ${sslcommand[*]} -sigalgs $test_sigalgs"
@@ -1878,7 +1888,7 @@ test_kex_sigalgs() {
         # since some ciphers supported by server may be SSLv2 only, we need to
         # force use of TLSv1.2, otherwise openssl will send a SSLv2 compatible
         # client hello
-        sslcommand+=("-no_ssl2" "-no_ssl3")
+        sslcommand+=("$NO_SSL2" "-no_ssl3")
 
         ratelimit
         verbose "Test ordering of sigalgs with ${sslcommand[*]} -sigalgs $test_sigalgs"
@@ -1939,6 +1949,10 @@ do
             DOBENCHMARK=1
             shift
             ;;
+	-c | --chacha20)
+	    CHACHA20=1
+	    shift
+	    ;;
         -D | --debug)
             DEBUG=1
             shift
@@ -2012,6 +2026,11 @@ do
     esac
 done
 
+if [[ $CHACHA20 -eq 1 ]]; then
+    CIPHERSUITE="CHACHA20:$CIPHERSUITE"
+else
+    CIPHERSUITE+=":+aRSA"
+fi
 if [[ -z $OPENSSLBIN ]]; then
     readlink_result=$("$READLINKBIN" -f "$0")
     if [[ -z $readlink_result ]]; then
@@ -2043,6 +2062,13 @@ fi
 if ! [[ $OPENSSLBINHELP =~ -connect ]]; then
     echo "$OPENSSLBIN s_client doesn't accept the -connect parameter, which is extremely strange; refusing to proceed." 1>&2
     exit 1
+fi
+
+if ! [[ $OPENSSLBINHELP =~ -no_ssl2 ]]; then
+    verbose "$OPENSSLBIN does not support SSL2"
+    NO_SSL2=""
+else
+    NO_SSL2=" -no_ssl2"
 fi
 
 if [[ -n $CAPATH && -n $CACERTS ]]; then
