@@ -5,6 +5,4 @@ tlslite
 */__pycache__
 *.pyc
 .coverage
-.python-ecdsa
-ecdsa
 tlslite

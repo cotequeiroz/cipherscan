@@ -1,0 +1,3 @@
+[submodule ".python-ecdsa"]
+	path = .python-ecdsa
+	url = https://github.com/tlsfuzzer/python-ecdsa
